@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inbox Assistant</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f7f8fa;--card:#fff;--ink:#1c2128;--mute:#667085;--line:#e1e5ea;--acc:#2b5cd9;--accbg:#e8eefc;--warn:#fff1b8;--bad:#b4442f;--ok:#1f7a4d}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#14161a;--card:#1d2026;--ink:#eceef1;--mute:#98a1ad;--line:#31353d;--acc:#7fa3ff;--accbg:#1f2b4a;--warn:#5a4a12;--bad:#e8806b;--ok:#6fd09b}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#14161a;--card:#1d2026;--ink:#eceef1;--mute:#98a1ad;--line:#31353d;--acc:#7fa3ff;--accbg:#1f2b4a;--warn:#5a4a12;--bad:#e8806b;--ok:#6fd09b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:900px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:24px;margin:6px 0 2px}.sub{color:var(--mute);margin:0 0 16px}
+textarea,input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}
+textarea{resize:vertical}
+label{display:block;font-size:12px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 4px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:620px){.grid,.cmp{grid-template-columns:1fr!important}}
+.btn{font:inherit;font-size:14px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+.btn.p{background:var(--acc);color:var(--bg);border-color:var(--acc)}.btn.d{color:var(--bad)}.btn:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:14px 0}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pill{display:inline-block;font-size:12px;border-radius:99px;padding:1px 9px;background:var(--accbg);color:var(--acc);margin-right:6px}
+.pill.high{background:var(--warn);color:var(--ink)}
+.orig{background:var(--bg);border-left:3px solid var(--line);padding:8px 10px;border-radius:4px;font-size:13px;white-space:pre-wrap;max-height:220px;overflow:auto}
+.msg{color:var(--mute);font-size:14px}.err{color:var(--bad)}.done{opacity:.55}
+.flag{background:var(--warn);padding:6px 10px;border-radius:6px;font-size:13px;margin:6px 0}
+details{margin-top:14px}summary{cursor:pointer;color:var(--mute)}
+</style></head><body><main>
+<h1>Inbox Assistant</h1>
+<p class="sub">Paste emails → it finds the ones that need a reply and drafts each one → you approve, edit, or discard. It never sends anything.</p>
+<div class="grid"><div><label>Your name / sign-off</label><input id="name" placeholder="Thanks, Sam"></div>
+<div><label>Your voice</label><input id="voice" placeholder="Short, friendly, direct; no filler"></div></div>
+<label>Standing rules (optional)</label><input id="rules" placeholder="e.g. Never offer meeting times; ask them to send options">
+<label>Match my voice: paste 2–3 replies you've actually sent (optional)</label><textarea id="samples" rows="3" placeholder="Paste a few of your real sent emails here so drafts sound like you"></textarea>
+<label>Emails: paste them, or upload .eml / .mbox / .txt files (Gmail: ⋮ → Download message; Outlook: drag message to desktop)</label>
+<input type="file" id="file" accept=".eml,.mbox,.txt" multiple style="margin-bottom:8px">
+<textarea id="emails" rows="10" placeholder="From: Dana Lee&#10;Subject: Q3 budget&#10;&#10;Can you send me the updated numbers by Friday?&#10;---&#10;From: Newsletter&#10;Subject: Weekly digest&#10;..."></textarea>
+<div class="row"><button class="btn p" id="go">Find replies &amp; draft</button><button class="btn" id="demo">Try sample emails</button><button class="btn" id="clear">Clear results</button><span class="msg" id="st"></span></div>
+<div id="out"></div>
+<details><summary>Run it on a schedule</summary><p class="msg">A web page can't check your inbox while it's closed. To automate this, connect Gmail or Outlook in Claude and ask it to run these same rules daily. Keep the draft-only rule so you approve everything. Your settings above are saved in this browser.</p></details>
+</main>
+<script>
+const $=id=>document.getElementById(id),K='inbox-asst-v1';let sample=null,items=[];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const F=['name','voice','rules','samples'];
+try{const s=JSON.parse(localStorage.getItem(K)||'{}');F.forEach(k=>$(k).value=s[k]||'')}catch(e){}
+F.forEach(k=>$(k).oninput=()=>{try{localStorage.setItem(K,JSON.stringify(Object.fromEntries(F.map(f=>[f,$(f).value]))))}catch(e){}});
+claude.use('sample').then(s=>{sample=s;if(!s){$('st').textContent='AI drafting is unavailable in this view.';$('go').disabled=true}}).catch(()=>{});
+$('demo').onclick=()=>{$('emails').value=`From: Dana Lee <dana@acme.com>
+Subject: Q3 budget numbers
+Hi, can you send me the updated Q3 numbers by Friday? Finance is asking and I need to confirm the total.
+---
+From: ShopDeals <promo@shopdeals.com>
+Subject: 50% off this weekend only!
+Don't miss our biggest sale of the year. Unsubscribe anytime.
+---
+From: Marcus Tran <marcus@partner.io>
+Subject: Intro call next week?
+Hey, loved your talk. Would you be open to a 20-minute intro call next week to talk about a possible collaboration? Let me know what works.
+---
+From: GitHub <noreply@github.com>
+Subject: [repo] Build passed
+Your workflow run succeeded.`};
+function splitEmails(raw){
+ if(/^\s*---\s*$/m.test(raw))return raw.split(/^\s*---\s*$/m).map(s=>s.trim()).filter(Boolean);
+ if((raw.match(/^From: /mg)||[]).length>1)return raw.split(/^(?=From: )/m).map(s=>s.trim()).filter(Boolean);
+ return [raw.trim()]}
+function parseEml(t){const i=t.search(/\r?\n\r?\n/);const h=t.slice(0,i<0?t.length:i),b=i<0?'':t.slice(i).trim();
+ const g=n=>(h.match(new RegExp('^'+n+':[^\\n]*(?:\\n[ \\t][^\\n]*)*','im'))||[''])[0].replace(/\s+/g,' ');
+ return [g('From'),g('Date'),g('Subject'),'',b].join('\n')}
+$('file').onchange=async e=>{const out=[];for(const f of e.target.files){const t=await f.text();
+ if(/\.mbox$/i.test(f.name))t.split(/^From \S+.*$/m).map(s=>s.trim()).filter(Boolean).forEach(m=>out.push(parseEml(m)));
+ else if(/\.eml$/i.test(f.name))out.push(parseEml(t));else out.push(t.trim())}
+ $('emails').value=($('emails').value.trim()?$('emails').value.trim()+'\n---\n':'')+out.join('\n---\n');e.target.value='';$('st').textContent=out.length+' email(s) loaded.'};
+$('clear').onclick=()=>{items=[];$('out').innerHTML='';$('st').textContent='';render()};
+$('go').onclick=async()=>{
+ const raw=$('emails').value.trim();if(!raw||!sample)return;
+ const list=splitEmails(raw).slice(0,15);
+ $('go').disabled=true;$('st').className='msg';$('st').textContent='Reading '+list.length+' emails…';
+ const p=`You are an inbox assistant. Below are ${list.length} emails numbered from 0. Decide which need a personal reply from me.
+Needs a reply: a direct question, request, scheduling ask, or a message waiting on my decision. Skip newsletters, promotions, receipts, automated notifications, mass mail, and threads where I'm only CC'd.
+My voice: ${$('voice').value||'brief, friendly, direct'}.${$('samples').value.trim()?' Match the style of these real replies I sent (style only, never reuse their facts):\n'+$('samples').value.trim().slice(0,2500)+'\n':''} Sign-off: ${$('name').value||'(none)'}. Standing rules: ${$('rules').value||'none'}.
+For every email return one object. Return ONLY a JSON array: [{"i":number,"needsReply":boolean,"from":"sender","fromEmail":"sender's address if present, else empty","subject":"...","summary":"one line on what they want","reason":"why it does/doesn't need a reply, short","urgency":"high"|"normal"|"low","draft":"full reply text, only if needsReply, else empty","confirm":["facts you had to leave as placeholders"]}].
+Reply only to the newest message in each email, ignoring quoted history and signatures. Never invent facts, dates, prices, or commitments: put [CONFIRM: what's needed] in the draft and list it in "confirm". Don't promise anything on my behalf that the email doesn't give me.
+
+EMAILS:
+${list.map((e,i)=>`### ${i}\n${e.slice(0,3000)}`).join('\n\n')}`;
+ try{
+  const r=await sample.json(p);const a=Array.isArray(r)?r:(r.emails||[]);
+  items=a.map(x=>({...x,orig:list[x.i]??'',state:'pending'}));
+  const rank={high:0,normal:1,low:2};items.sort((x,y)=>(y.needsReply-x.needsReply)||((rank[x.urgency]??1)-(rank[y.urgency]??1)));
+  $('st').textContent=items.filter(x=>x.needsReply).length+' of '+items.length+' need a reply.';render();
+ }catch(e){$('st').className='msg err';$('st').textContent=e&&e.code==='not_granted'?'Permission to use AI was declined.':'Something went wrong. Try fewer emails.'}
+ $('go').disabled=false};
+function render(){
+ try{localStorage.setItem(K+'-items',JSON.stringify(items))}catch(e){}
+ const need=items.filter(x=>x.needsReply),skip=items.filter(x=>!x.needsReply);
+ $('out').innerHTML=need.map(card).join('')+(skip.length?`<details><summary>${skip.length} skipped (no reply needed)</summary>${skip.map(x=>`<div class="card"><b>${esc(x.subject)}</b> <span class="msg">— ${esc(x.from)}</span><div class="msg">${esc(x.reason)}</div></div>`).join('')}</details>`:'');}
+function card(x){const k=items.indexOf(x),f=(x.draft.match(/\[CONFIRM[^\]]*\]/g)||[]);
+ return`<div class="card ${x.state==='discarded'?'done':''}"><div><span class="pill ${x.urgency==='high'?'high':''}">${esc(x.urgency)}</span><b>${esc(x.subject)}</b> <span class="msg">— ${esc(x.from)}</span></div>
+ <div class="msg">${esc(x.summary)}</div>
+ <div class="cmp" style="margin-top:10px"><div><label>Original email</label><div class="orig">${esc(x.orig)}</div></div>
+ <div><label>Draft reply (editable)</label><textarea rows="9" data-k="${k}" class="dr">${esc(x.draft)}</textarea></div></div>
+ ${f.length?`<div class="flag">⚠ Needs your input: ${f.map(esc).join(' · ')}</div>`:''}
+ <div class="row">${x.state==='approved'?'<span class="msg" style="color:var(--ok)">✓ Approved — copy it into your mail app</span>':''}
+ <button class="btn p" data-a="mail" data-k="${k}">Open in my mail app</button><button class="btn" data-a="copy" data-k="${k}">Approve &amp; copy</button><button class="btn d" data-a="del" data-k="${k}">Discard</button></div></div>`}
+$('out').oninput=e=>{if(e.target.classList.contains('dr')){const x=items[+e.target.dataset.k];x.draft=e.target.value}};
+$('out').onclick=async e=>{const a=e.target.dataset.a;if(!a)return;const x=items[+e.target.dataset.k];
+ if(a==='del'){x.needsReply=false;x.reason='Discarded by you.'}
+ else if(a==='mail'){ if(/\[CONFIRM/.test(x.draft)&&!confirm('This draft still has [CONFIRM] placeholders. Open anyway?'))return;
+  const to=(x.fromEmail||(x.from.match(/<([^>]+)>/)||[])[1]||'').trim(),sj=/^re:/i.test(x.subject)?x.subject:'Re: '+x.subject;
+  window.open('mailto:'+encodeURIComponent(to).replace('%40','@')+'?subject='+encodeURIComponent(sj)+'&body='+encodeURIComponent(x.draft.slice(0,1800)),'_blank');x.state='approved'}
+ else{ if(/\[CONFIRM/.test(x.draft)&&!confirm('This draft still has [CONFIRM] placeholders. Copy anyway?'))return;
+  try{await navigator.clipboard.writeText(x.draft)}catch(_){const t=document.querySelector('.dr[data-k="'+items.indexOf(x)+'"]');t.select();document.execCommand('copy')}
+  x.state='approved'}
+ const sc=document.scrollingElement.scrollTop;render();document.scrollingElement.scrollTop=sc};
+try{items=JSON.parse(localStorage.getItem(K+'-items')||'[]');if(items.length){$('st').textContent='Restored your last session.';render()}}catch(e){}
+</script></body></html>
